@@ -1,5 +1,5 @@
 import { browser } from 'wxt/browser';
-import { getConfig, addSyncLog, updateSyncLog } from '@/lib/storage';
+import { getConfig, addSyncLog, updateSyncLog, isSubmissionSynced, markSubmissionSynced } from '@/lib/storage';
 import { syncSolutionToGitHub } from '@/lib/github';
 import type { SubmissionData, SyncLog } from '@/lib/types';
 
@@ -17,6 +17,20 @@ export default defineBackground(() => {
 
     if (message?.type === 'GET_CONFIG') {
       getConfig().then((config) => sendResponse(config));
+      return true;
+    }
+
+    if (message?.type === 'IS_SUBMISSION_SYNCED') {
+      isSubmissionSynced(message.payload.platform, message.payload.submissionId)
+        .then((synced) => sendResponse({ synced }))
+        .catch(() => sendResponse({ synced: false }));
+      return true;
+    }
+
+    if (message?.type === 'MARK_SUBMISSION_SYNCED') {
+      markSubmissionSynced(message.payload.platform, message.payload.submissionId)
+        .then(() => sendResponse({ ok: true }))
+        .catch(() => sendResponse({ ok: false }));
       return true;
     }
   });
@@ -63,6 +77,10 @@ async function handleSyncSubmission(
       commitSha: result.commitSha,
       commitUrl: result.commitUrl,
     });
+
+    if (submission.submissionId) {
+      await markSubmissionSynced(submission.platform, submission.submissionId);
+    }
 
     // Notify user
     try {

@@ -19,29 +19,6 @@
 
 ---
 
-## Directory Structure in GitHub
-
-When you solve a problem, CPBase organizes your repository like this:
-
-```text
-my-solutions-repo/
-├── README.md                      # Auto-maintained index table with badges
-├── Codeforces/
-│   └── 1900/
-│       └── 1900A - Line Trip/
-│           ├── Solution.cpp
-│           ├── README.md          # Formatted problem statement & test cases
-│           └── metadata.json      # Structured machine-readable details
-└── TLX/
-    └── Contest-troc-30/
-        └── troc-30-a/
-            ├── Solution.cpp
-            ├── README.md
-            └── metadata.json
-```
-
----
-
 ## Getting Started
 
 ### 1. Development & Building

@@ -1,8 +1,5 @@
 import { htmlToMarkdown } from './html-to-markdown';
 
-/**
- * Decode HTML entities like &quot;, &lt;, &gt;, etc.
- */
 export function decodeEntities(str: string): string {
   return str
     .replace(/&lt;/g, '<')
@@ -17,33 +14,20 @@ export function decodeEntities(str: string): string {
     .replace(/&ne;/g, '!=');
 }
 
-/**
- * Clean Codeforces Problem Statement into publication-ready Markdown
- */
 export function extractCodeforcesStatement(statementEl: Element): string {
-  // Clone element so we can safely mutate DOM without touching the live page
   const clone = statementEl.cloneNode(true) as HTMLElement;
 
-  // 1. Remove CPBase extension injected buttons, containers, and badges
   clone.querySelectorAll('#cpbase-cf-sync-container, [id^="cpbase-"]').forEach((el) => el.remove());
-
-  // 2. Remove .header entirely (title, time limit, memory limit, standard I/O are already in README header)
   clone.querySelector('.header')?.remove();
-
-  // 3. Remove clipboard / copy buttons inside sample tests
   clone.querySelectorAll('.input-copy, .output-copy, .copy-button, .clipboard-copy').forEach((el) => el.remove());
-
-  // 4. Handle MathJax / LaTeX formulas & eliminate assistive duplication (e.g. "SS", "++", "tt")
   clone.querySelectorAll('.MJX_Assistive_MathML, .MathJax_Preview, .MathJax_Processing').forEach((el) => el.remove());
 
-  // Replace MathJax script tags with clean inline LaTeX: $formula$
   clone.querySelectorAll('script[type="math/tex"]').forEach((script) => {
     const formula = script.textContent?.trim() || '';
     const textNode = document.createTextNode(`$${formula}$`);
     script.parentNode?.replaceChild(textNode, script);
   });
 
-  // For any remaining MathJax container elements, replace with their text wrapped in $
   clone.querySelectorAll('.MathJax').forEach((mathEl) => {
     const formula = mathEl.textContent?.trim() || '';
     if (formula) {
@@ -54,7 +38,6 @@ export function extractCodeforcesStatement(statementEl: Element): string {
     }
   });
 
-  // 5. Extract Sample Tests cleanly with preserved newlines
   const sampleTestsContainer = clone.querySelector('.sample-tests');
   let sampleTestsMarkdown = '';
 
@@ -129,7 +112,6 @@ export function extractCodeforcesStatement(statementEl: Element): string {
     sampleTestsContainer.remove();
   }
 
-  // 6. Extract Input Specification
   const inputSpec = clone.querySelector('.input-specification');
   let inputSpecMarkdown = '';
   if (inputSpec) {
@@ -141,7 +123,6 @@ export function extractCodeforcesStatement(statementEl: Element): string {
     inputSpec.remove();
   }
 
-  // 7. Extract Output Specification
   const outputSpec = clone.querySelector('.output-specification');
   let outputSpecMarkdown = '';
   if (outputSpec) {
@@ -153,7 +134,6 @@ export function extractCodeforcesStatement(statementEl: Element): string {
     outputSpec.remove();
   }
 
-  // 8. Extract Note section
   const noteSpec = clone.querySelector('.note');
   let noteSpecMarkdown = '';
   if (noteSpec) {
@@ -165,10 +145,8 @@ export function extractCodeforcesStatement(statementEl: Element): string {
     noteSpec.remove();
   }
 
-  // 9. Extract remaining narrative / problem description
   const descriptionMarkdown = htmlToMarkdown(clone.innerHTML).trim();
 
-  // 10. Assemble structured markdown
   const sections: string[] = [];
   if (descriptionMarkdown) sections.push(descriptionMarkdown);
   if (inputSpecMarkdown) sections.push(inputSpecMarkdown);
@@ -179,19 +157,11 @@ export function extractCodeforcesStatement(statementEl: Element): string {
   return sections.join('\n\n').trim();
 }
 
-/**
- * Clean TLX Toki Problem Statement into clean Markdown
- */
 export function extractTLXStatement(contentEl: Element): string {
   const clone = contentEl.cloneNode(true) as HTMLElement;
 
-  // Remove CPBase floating button and any injected elements
   clone.querySelectorAll('#cpbase-tlx-sync-btn, [id^="cpbase-"]').forEach((el) => el.remove());
-
-  // Clean MathJax / KaTeX duplicates if present
   clone.querySelectorAll('.katex-html, .MJX_Assistive_MathML').forEach((el) => el.remove());
-
-  // Clean copy buttons
   clone.querySelectorAll('button, .copy-btn, .copy-button').forEach((el) => el.remove());
 
   return htmlToMarkdown(clone.innerHTML).trim();

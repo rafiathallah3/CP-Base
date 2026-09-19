@@ -2,7 +2,7 @@ import type { GitHubRepo, GitHubUser, SubmissionData } from './types';
 
 const GITHUB_API_BASE = 'https://api.github.com';
 
-function getHeaders(token: string) {
+function buatHeadersGitHub(token: string) {
   return {
     Authorization: `Bearer ${token.trim()}`,
     Accept: 'application/vnd.github+json',
@@ -11,9 +11,6 @@ function getHeaders(token: string) {
   };
 }
 
-/**
- * UTF-8 safe base64 encoding in browser / WebExtension
- */
 export function utf8ToBase64(str: string): string {
   const bytes = new TextEncoder().encode(str);
   let binary = '';
@@ -23,9 +20,6 @@ export function utf8ToBase64(str: string): string {
   return btoa(binary);
 }
 
-/**
- * UTF-8 safe base64 decoding in browser / WebExtension
- */
 export function base64ToUtf8(base64: string): string {
   const binary = atob(base64.replace(/\s/g, ''));
   const bytes = new Uint8Array(binary.length);
@@ -37,7 +31,7 @@ export function base64ToUtf8(base64: string): string {
 
 export async function verifyGitHubToken(token: string): Promise<GitHubUser> {
   const res = await fetch(`${GITHUB_API_BASE}/user`, {
-    headers: getHeaders(token),
+    headers: buatHeadersGitHub(token),
   });
 
   if (!res.ok) {
@@ -50,7 +44,7 @@ export async function verifyGitHubToken(token: string): Promise<GitHubUser> {
 
 export async function listUserRepos(token: string): Promise<GitHubRepo[]> {
   const res = await fetch(`${GITHUB_API_BASE}/user/repos?per_page=100&sort=updated`, {
-    headers: getHeaders(token),
+    headers: buatHeadersGitHub(token),
   });
 
   if (!res.ok) {
@@ -76,7 +70,7 @@ export async function createRepo(
 ): Promise<GitHubRepo> {
   const res = await fetch(`${GITHUB_API_BASE}/user/repos`, {
     method: 'POST',
-    headers: getHeaders(token),
+    headers: buatHeadersGitHub(token),
     body: JSON.stringify({
       name,
       private: isPrivate,
@@ -101,7 +95,7 @@ export async function getFileSha(
   branch: string,
 ): Promise<{ sha: string; content?: string } | null> {
   const url = `${GITHUB_API_BASE}/repos/${owner}/${repo}/contents/${encodeURIComponent(path).replace(/%2F/g, '/')}?ref=${encodeURIComponent(branch)}`;
-  const res = await fetch(url, { headers: getHeaders(token) });
+  const res = await fetch(url, { headers: buatHeadersGitHub(token) });
 
   if (res.status === 404) {
     return null;
@@ -142,7 +136,7 @@ export async function putFile(
 
   const res = await fetch(url, {
     method: 'PUT',
-    headers: getHeaders(token),
+    headers: buatHeadersGitHub(token),
     body: JSON.stringify(body),
   });
 
@@ -158,7 +152,7 @@ export async function putFile(
   };
 }
 
-function sanitizeFolderName(name: string): string {
+function bersihkanNamaFolder(name: string): string {
   return name.replace(/[\\/:*?"<>|]/g, '-').trim();
 }
 
@@ -229,27 +223,25 @@ export async function syncSolutionToGitHub(
 ): Promise<{ commitSha: string; commitUrl: string }> {
   const p = submission.problem;
 
-  let folderPath = '';
+  let jalurFolder = '';
   if (p.platform === 'codeforces') {
-    const contest = p.contestId ? sanitizeFolderName(p.contestId) : 'Problemset';
-    const title = sanitizeFolderName(`${p.problemId} - ${p.problemTitle}`);
-    folderPath = `Codeforces/${contest}/${title}`;
+    const contest = p.contestId ? bersihkanNamaFolder(p.contestId) : 'Problemset';
+    const title = bersihkanNamaFolder(`${p.problemId} - ${p.problemTitle}`);
+    jalurFolder = `Codeforces/${contest}/${title}`;
   } else {
-    // TLX Toki
-    const category = p.contestId ? sanitizeFolderName(p.contestId) : 'Training';
-    const title = sanitizeFolderName(p.problemTitle || p.problemId);
-    folderPath = `TLX/${category}/${title}`;
+    const category = p.contestId ? bersihkanNamaFolder(p.contestId) : 'Training';
+    const title = bersihkanNamaFolder(p.problemTitle || p.problemId);
+    jalurFolder = `TLX/${category}/${title}`;
   }
 
-  const solutionPath = `${folderPath}/Solution.${submission.extension}`;
-  const readmePath = `${folderPath}/README.md`;
-  const metadataPath = `${folderPath}/metadata.json`;
+  const solutionPath = `${jalurFolder}/Solution.${submission.extension}`;
+  const readmePath = `${jalurFolder}/README.md`;
+  const metadataPath = `${jalurFolder}/metadata.json`;
 
-  const commitMsg = `[${p.platform.toUpperCase()}] ${p.problemId} - ${p.problemTitle} (${submission.verdict})${
+  const pesanKomit = `[${p.platform.toUpperCase()}] ${p.problemId} - ${p.problemTitle} (${submission.verdict})${
     submission.executionTime ? ` | ${submission.executionTime}` : ''
   }${submission.memoryUsed ? ` | ${submission.memoryUsed}` : ''}`;
 
-  // 1. Commit solution source code
   const existingSolSha = await getFileSha(token, owner, repo, solutionPath, branch);
   const solResult = await putFile(
     token,
@@ -257,12 +249,11 @@ export async function syncSolutionToGitHub(
     repo,
     solutionPath,
     submission.sourceCode,
-    commitMsg,
+    pesanKomit,
     branch,
     existingSolSha?.sha,
   );
 
-  // 2. Commit problem README.md
   try {
     const existingReadmeSha = await getFileSha(token, owner, repo, readmePath, branch);
     await putFile(
@@ -275,11 +266,8 @@ export async function syncSolutionToGitHub(
       branch,
       existingReadmeSha?.sha,
     );
-  } catch (err) {
-    console.warn('[CPBase] Failed to commit problem README:', err);
-  }
+  } catch {}
 
-  // 3. Commit metadata.json
   try {
     const existingMetaSha = await getFileSha(token, owner, repo, metadataPath, branch);
     await putFile(
@@ -292,16 +280,11 @@ export async function syncSolutionToGitHub(
       branch,
       existingMetaSha?.sha,
     );
-  } catch (err) {
-    console.warn('[CPBase] Failed to commit metadata.json:', err);
-  }
+  } catch {}
 
-  // 4. Update root README.md summary index
   try {
-    await updateRootIndex(token, owner, repo, branch, submission, folderPath);
-  } catch (err) {
-    console.warn('[CPBase] Failed to update root README.md index:', err);
-  }
+    await updateRootIndex(token, owner, repo, branch, submission, jalurFolder);
+  } catch {}
 
   return solResult;
 }
@@ -328,7 +311,6 @@ async function updateRootIndex(
   const newRow = `| ${platformName} | [${p.problemId}](${p.problemUrl}) | ${problemLink} | \`${submission.language}\` | ${submission.executionTime || '-'} | ${submission.memoryUsed || '-'} | ${dateStr} |`;
 
   if (!content.includes(TABLE_START_MARKER)) {
-    // Scaffold new root README
     content = `# Competitive Programming Solutions\n\nAutomated solution tracker powered by **[CPBase](https://github.com/)**.\n\n### Solved Problems\n\n${TABLE_START_MARKER}\n| Platform | Problem ID | Title | Language | Time | Memory | Date |\n| :--- | :--- | :--- | :--- | :--- | :--- | :--- |\n${newRow}\n${TABLE_END_MARKER}\n`;
   } else {
     const beforeTable = content.substring(0, content.indexOf(TABLE_START_MARKER) + TABLE_START_MARKER.length);
@@ -336,7 +318,6 @@ async function updateRootIndex(
     const tableBody = tableAndAfter.substring(0, tableAndAfter.indexOf(TABLE_END_MARKER));
     const afterTable = tableAndAfter.substring(tableAndAfter.indexOf(TABLE_END_MARKER));
 
-    // Check if problem already exists in table
     const lines = tableBody.split('\n');
     const existingIndex = lines.findIndex((l) => l.includes(`[${p.problemId}]`));
 

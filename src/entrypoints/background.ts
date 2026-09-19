@@ -4,15 +4,13 @@ import { syncSolutionToGitHub } from '@/lib/github';
 import type { SubmissionData, SyncLog } from '@/lib/types';
 
 export default defineBackground(() => {
-  console.log('[CPBase] Background service worker/script initialized.');
-
   browser.runtime.onMessage.addListener((message: any, _sender, sendResponse) => {
     if (message?.type === 'SYNC_SUBMISSION') {
       const submission: SubmissionData = message.payload;
-      handleSyncSubmission(submission)
-        .then((result) => sendResponse(result))
-        .catch((error) => sendResponse({ ok: false, error: error.message }));
-      return true; // async response
+      tanganiSinkronisasiSubmission(submission)
+        .then((hasil) => sendResponse(hasil))
+        .catch((kesalahan) => sendResponse({ ok: false, error: kesalahan.message }));
+      return true;
     }
 
     if (message?.type === 'GET_CONFIG') {
@@ -36,7 +34,7 @@ export default defineBackground(() => {
   });
 });
 
-async function handleSyncSubmission(
+async function tanganiSinkronisasiSubmission(
   submission: SubmissionData,
 ): Promise<{ ok: boolean; commitUrl?: string; error?: string }> {
   const config = await getConfig();
@@ -45,7 +43,6 @@ async function handleSyncSubmission(
     throw new Error('GitHub PAT or repository not configured in CPBase settings.');
   }
 
-  // Check if platform is enabled
   if (config.enabledPlatforms[submission.platform] === false) {
     return { ok: false, error: `Platform ${submission.platform} is disabled in CPBase settings.` };
   }
@@ -64,7 +61,7 @@ async function handleSyncSubmission(
   await addSyncLog(log);
 
   try {
-    const result = await syncSolutionToGitHub(
+    const hasil = await syncSolutionToGitHub(
       config.githubToken,
       config.githubOwner,
       config.githubRepo,
@@ -74,15 +71,14 @@ async function handleSyncSubmission(
 
     await updateSyncLog(logId, {
       status: 'success',
-      commitSha: result.commitSha,
-      commitUrl: result.commitUrl,
+      commitSha: hasil.commitSha,
+      commitUrl: hasil.commitUrl,
     });
 
     if (submission.submissionId) {
       await markSubmissionSynced(submission.platform, submission.submissionId);
     }
 
-    // Notify user
     try {
       await browser.notifications.create({
         type: 'basic',
@@ -90,17 +86,15 @@ async function handleSyncSubmission(
         title: 'CPBase Sync Success',
         message: `Successfully committed ${submission.problem.problemId} - ${submission.problem.problemTitle} to ${config.githubRepo}!`,
       });
-    } catch {
-      // notifications permission optional
-    }
+    } catch {}
 
-    return { ok: true, commitUrl: result.commitUrl };
+    return { ok: true, commitUrl: hasil.commitUrl };
   } catch (err: any) {
-    const errorMsg = err?.message || 'Unknown GitHub commit error';
+    const pesanKesalahan = err?.message || 'Unknown GitHub commit error';
     await updateSyncLog(logId, {
       status: 'error',
-      error: errorMsg,
+      error: pesanKesalahan,
     });
-    return { ok: false, error: errorMsg };
+    return { ok: false, error: pesanKesalahan };
   }
 }

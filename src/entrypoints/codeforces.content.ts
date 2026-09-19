@@ -1,7 +1,6 @@
 import { browser } from 'wxt/browser';
-import { htmlToMarkdown } from '@/lib/html-to-markdown';
 import { extractCodeforcesStatement } from '@/lib/problem-parser';
-import { detectFileExtension } from '@/lib/languages';
+import { deteksiEkstensiFile } from '@/lib/languages';
 import type { ProblemDetails, SubmissionData } from '@/lib/types';
 
 export default defineContentScript({
@@ -24,17 +23,47 @@ export default defineContentScript({
   ],
   runAt: 'document_idle',
   main() {
-    console.log('[CPBase] Codeforces content script activated.');
-    initCodeforcesSyncButton();
-    checkSingleSubmissionPage();
-    observeSubmissionStatus();
+    perbaruiVisibilitasTombolSyncCodeforces();
+    pantauPerubahanPengaturanStorage();
+    periksaHalamanSubmissionTunggal();
+    pantauStatusSubmission();
   },
 });
 
-let isAutoSyncing = false;
-const processedSubmissionIds = new Set<string>();
+let sedangAutoSync = false;
+const idSubmissionDiproses = new Set<string>();
 
-function getContestAndIndex(): { contestId: string; index: string } | null {
+function pantauPerubahanPengaturanStorage() {
+  try {
+    browser.storage?.onChanged?.addListener((perubahan, area) => {
+      if (area === 'local' && perubahan.cpbase_config) {
+        perbaruiVisibilitasTombolSyncCodeforces();
+      }
+    });
+  } catch {}
+}
+
+async function perbaruiVisibilitasTombolSyncCodeforces() {
+  try {
+    const config = await browser.runtime.sendMessage({ type: 'GET_CONFIG' });
+    const autoSyncAktif = config?.autoSync !== false;
+    const wadahLama = document.getElementById('cpbase-cf-sync-container');
+
+    if (autoSyncAktif) {
+      if (wadahLama) {
+        wadahLama.remove();
+      }
+    } else {
+      if (!wadahLama) {
+        inisialisasiTombolSyncCodeforces();
+      }
+    }
+  } catch {
+    inisialisasiTombolSyncCodeforces();
+  }
+}
+
+function ambilContestDanIndex(): { contestId: string; index: string } | null {
   const path = window.location.pathname;
   let m = path.match(/\/contest\/(\d+)\/problem\/([A-Za-z0-9]+)/i);
   if (m) return { contestId: m[1], index: m[2].toUpperCase() };
@@ -48,7 +77,7 @@ function getContestAndIndex(): { contestId: string; index: string } | null {
   return null;
 }
 
-function parseProblemFromUrl(url: string): { contestId: string; index: string } | null {
+function uraikanProblemDariUrl(url: string): { contestId: string; index: string } | null {
   let m = url.match(/\/contest\/(\d+)\/problem\/([A-Za-z0-9]+)/i);
   if (m) return { contestId: m[1], index: m[2].toUpperCase() };
 
@@ -61,8 +90,8 @@ function parseProblemFromUrl(url: string): { contestId: string; index: string } 
   return null;
 }
 
-function extractProblemDetails(): ProblemDetails | null {
-  const ci = getContestAndIndex();
+function ekstrakDetailProblem(): ProblemDetails | null {
+  const ci = ambilContestDanIndex();
   if (!ci) return null;
 
   const header = document.querySelector('.problem-statement .header');
@@ -101,20 +130,17 @@ function extractProblemDetails(): ProblemDetails | null {
   };
 }
 
-/**
- * Injects a modern "Sync to GitHub" button into problem header (manual trigger)
- */
-function initCodeforcesSyncButton() {
+function inisialisasiTombolSyncCodeforces() {
   const header = document.querySelector('.problem-statement .header');
   if (!header || document.getElementById('cpbase-cf-sync-btn')) return;
 
-  const container = document.createElement('div');
-  container.id = 'cpbase-cf-sync-container';
-  container.style.cssText = 'margin-top: 12px; display: flex; gap: 8px; align-items: center; justify-content: center;';
+  const wadahTombol = document.createElement('div');
+  wadahTombol.id = 'cpbase-cf-sync-container';
+  wadahTombol.style.cssText = 'margin-top: 12px; display: flex; gap: 8px; align-items: center; justify-content: center;';
 
-  const button = document.createElement('button');
-  button.id = 'cpbase-cf-sync-btn';
-  button.innerHTML = `
+  const tombolSync = document.createElement('button');
+  tombolSync.id = 'cpbase-cf-sync-btn';
+  tombolSync.innerHTML = `
     <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="margin-right: 6px;">
       <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
       <polyline points="17 8 12 3 7 8"></polyline>
@@ -122,7 +148,7 @@ function initCodeforcesSyncButton() {
     </svg>
     Sync to GitHub
   `;
-  button.style.cssText = `
+  tombolSync.style.cssText = `
     display: inline-flex;
     align-items: center;
     background-color: #10b981;
@@ -138,37 +164,34 @@ function initCodeforcesSyncButton() {
     transition: all 0.15s ease;
   `;
 
-  button.onmouseover = () => (button.style.backgroundColor = '#059669');
-  button.onmouseout = () => (button.style.backgroundColor = '#10b981');
+  tombolSync.onmouseover = () => (tombolSync.style.backgroundColor = '#059669');
+  tombolSync.onmouseout = () => (tombolSync.style.backgroundColor = '#10b981');
 
   const statusSpan = document.createElement('span');
   statusSpan.id = 'cpbase-cf-sync-status';
   statusSpan.style.cssText = 'font-size: 12px; color: #64748b; font-family: system-ui, -apple-system, sans-serif;';
 
-  container.appendChild(button);
-  container.appendChild(statusSpan);
-  header.appendChild(container);
+  wadahTombol.appendChild(tombolSync);
+  wadahTombol.appendChild(statusSpan);
+  header.appendChild(wadahTombol);
 
-  button.addEventListener('click', async () => {
-    button.disabled = true;
+  tombolSync.addEventListener('click', async () => {
+    tombolSync.disabled = true;
     statusSpan.textContent = 'Fetching latest AC submission...';
     statusSpan.style.color = '#3b82f6';
 
     try {
-      await fetchAndSyncLatestAC(statusSpan);
+      await ambilDanSinkronisasiACTerakhir(statusSpan);
     } catch (err: any) {
       statusSpan.textContent = `Sync failed: ${err.message}`;
       statusSpan.style.color = '#ef4444';
     } finally {
-      button.disabled = false;
+      tombolSync.disabled = false;
     }
   });
 }
 
-/**
- * Helper to decode HTML entities in source code
- */
-function decodeEntities(str: string): string {
+function dekodeEntitasHtml(str: string): string {
   return str
     .replace(/&lt;/g, '<')
     .replace(/&gt;/g, '>')
@@ -179,13 +202,10 @@ function decodeEntities(str: string): string {
     .replace(/&amp;/g, '&');
 }
 
-/**
- * Extract source code from HTML strings or markup blocks
- */
-function extractSourceFromHtml(html: string): string | null {
+function ekstrakSourceDariHtml(html: string): string | null {
   if (!html || typeof html !== 'string') return null;
 
-  const patterns = [
+  const pola = [
     /<pre[^>]*id=["']program-source-text["'][^>]*>([\s\S]*?)<\/pre>/i,
     /id=["']program-source-text["'][^>]*>([\s\S]*?)<\/pre>/i,
     /<pre[^>]*class=["'][^"']*prettyprint[^"']*["'][^>]*>([\s\S]*?)<\/pre>/i,
@@ -196,16 +216,16 @@ function extractSourceFromHtml(html: string): string | null {
     /<code[^>]*class=["'][^"']*prettyprint[^"']*["'][^>]*>([\s\S]*?)<\/code>/i,
   ];
 
-  for (const re of patterns) {
+  for (const re of pola) {
     const m = html.match(re);
     if (m && m[1]) {
-      const text = m[1]
+      const teks = m[1]
         .replace(/<br\s*\/?>/gi, '\n')
         .replace(/<\/(?:li|div|p)>/gi, '\n')
         .replace(/<[^>]+>/g, '');
-      const decoded = decodeEntities(text).trim();
-      if (decoded.length > 0 && !/access denied|forbidden|please wait|just a moment/i.test(decoded)) {
-        return decoded;
+      const hasilDekode = dekodeEntitasHtml(teks).trim();
+      if (hasilDekode.length > 0 && !/access denied|forbidden|please wait|just a moment/i.test(hasilDekode)) {
+        return hasilDekode;
       }
     }
   }
@@ -223,11 +243,8 @@ function extractSourceFromHtml(html: string): string | null {
   return null;
 }
 
-/**
- * Check if the source code is already visible anywhere in the active document
- */
-function findSourceCodeInActiveDocument(): string | null {
-  const selectors = [
+function cariSourceCodeActivediDocument(): string | null {
+  const pemilih = [
     '#program-source-text',
     'pre.program-source',
     'pre.prettyprint',
@@ -241,12 +258,12 @@ function findSourceCodeInActiveDocument(): string | null {
     'div.source-copier + pre',
   ];
 
-  for (const sel of selectors) {
-    const elements = document.querySelectorAll(sel);
-    for (const el of Array.from(elements)) {
-      const text = (el instanceof HTMLTextAreaElement ? el.value : el.textContent)?.trim();
-      if (text && text.length > 5 && !/access denied|forbidden|please wait/i.test(text)) {
-        return text;
+  for (const sel of pemilih) {
+    const elemenList = document.querySelectorAll(sel);
+    for (const el of Array.from(elemenList)) {
+      const teks = (el instanceof HTMLTextAreaElement ? el.value : el.textContent)?.trim();
+      if (teks && teks.length > 5 && !/access denied|forbidden|please wait/i.test(teks)) {
+        return teks;
       }
     }
   }
@@ -254,10 +271,7 @@ function findSourceCodeInActiveDocument(): string | null {
   return null;
 }
 
-/**
- * Extract CSRF token from Codeforces page
- */
-function getCodeforcesCsrfToken(): string | null {
+function ambilTokenCsrfCodeforces(): string | null {
   const meta = document.querySelector('meta[name="X-Csrf-Token"]');
   const metaCsrf = meta?.getAttribute('content');
   if (metaCsrf) return metaCsrf;
@@ -289,15 +303,9 @@ function getCodeforcesCsrfToken(): string | null {
   return null;
 }
 
-/**
- * Fetch source code using Codeforces internal /data/submitSource endpoint
- */
-async function fetchSourceViaInternalApi(submissionId: number | string): Promise<string | null> {
-  const csrf = getCodeforcesCsrfToken();
-  if (!csrf) {
-    console.warn('[CPBase] CSRF token not found on Codeforces page.');
-    return null;
-  }
+async function ambilSourceViaApiInternal(submissionId: number | string): Promise<string | null> {
+  const csrf = ambilTokenCsrfCodeforces();
+  if (!csrf) return null;
 
   try {
     const res = await fetch('/data/submitSource', {
@@ -316,106 +324,114 @@ async function fetchSourceViaInternalApi(submissionId: number | string): Promise
 
     if (!res.ok) return null;
 
-    const text = await res.text();
+    const teks = await res.text();
 
-    if (text.trim().startsWith('{')) {
+    if (teks.trim().startsWith('{')) {
       try {
-        const json = JSON.parse(text);
+        const json = JSON.parse(teks);
         if (json.source && typeof json.source === 'string' && json.source.trim()) {
           return json.source.trim();
         }
       } catch {}
     }
 
-    const extracted = extractSourceFromHtml(text);
-    if (extracted) return extracted;
+    const ekstrakHasil = ekstrakSourceDariHtml(teks);
+    if (ekstrakHasil) return ekstrakHasil;
 
-    const plain = decodeEntities(text.replace(/<br\s*\/?>/gi, '\n').replace(/<[^>]+>/g, '')).trim();
-    if (plain && plain.length > 10 && !/forbidden|access denied|please wait|error/i.test(plain)) {
-      return plain;
+    const teksBiasa = dekodeEntitasHtml(teks.replace(/<br\s*\/?>/gi, '\n').replace(/<[^>]+>/g, '')).trim();
+    if (teksBiasa && teksBiasa.length > 10 && !/forbidden|access denied|please wait|error/i.test(teksBiasa)) {
+      return teksBiasa;
     }
-  } catch (err) {
-    console.warn('[CPBase] /data/submitSource failed:', err);
-  }
+  } catch {}
 
   return null;
 }
 
-/**
- * Attempt to click the submission link on the page to trigger Codeforces native modal
- */
-async function fetchSourceViaTriggeringModal(submissionId: number | string): Promise<string | null> {
-  const link = document.querySelector(
+async function ambilSourceViaTriggerModal(submissionId: number | string): Promise<string | null> {
+  const tautan = document.querySelector(
     `a.view-source[submissionid="${submissionId}"], a[href*="/submission/${submissionId}"]`,
   ) as HTMLElement;
 
-  if (!link) return null;
+  if (!tautan) return null;
 
-  link.click();
+  tautan.click();
 
   for (let i = 0; i < 15; i++) {
     await new Promise((resolve) => setTimeout(resolve, 150));
-    const code = findSourceCodeInActiveDocument();
-    if (code) {
-      const closeBtn = document.querySelector('#facebox .close, .source-popup .close, .close-button') as HTMLElement;
-      closeBtn?.click();
-      return code;
+    const kode = cariSourceCodeActivediDocument();
+    if (kode) {
+      const tombolTutup = document.querySelector('#facebox .close, .source-popup .close, .close-button') as HTMLElement;
+      tombolTutup?.click();
+      return kode;
     }
   }
 
   return null;
 }
 
-/**
- * Fallback direct GET fetch
- */
-async function fetchSourceViaDirectUrl(
+async function ambilSourceViaUrlLangsung(
   contestId: number | string,
   submissionId: number | string,
 ): Promise<string | null> {
   const isGym = String(contestId).startsWith('Gym-') || window.location.pathname.includes('/gym/');
   const cleanId = String(contestId).replace(/^Gym-/i, '');
-  const candidateUrls = [
+  const daftarKandidatUrl = [
     isGym
       ? `https://codeforces.com/gym/${cleanId}/submission/${submissionId}`
       : `https://codeforces.com/contest/${cleanId}/submission/${submissionId}`,
     `https://codeforces.com/problemset/submission/${cleanId}/${submissionId}`,
   ];
 
-  for (const url of candidateUrls) {
+  for (const url of daftarKandidatUrl) {
     try {
       const res = await fetch(url, { credentials: 'include' });
       if (!res.ok) continue;
       const html = await res.text();
-      const code = extractSourceFromHtml(html);
-      if (code) return code;
+      const kode = ekstrakSourceDariHtml(html);
+      if (kode) return kode;
     } catch {}
   }
 
   return null;
 }
 
-/**
- * Check if the "Last submissions" sidebar widget or status table has an accepted submission
- */
-function getLatestAcceptedFromSidebar(): { submissionId: string; language?: string } | null {
-  const tables = document.querySelectorAll('table.rtable, .status-frame-datatable');
-  for (const table of Array.from(tables)) {
-    const rows = table.querySelectorAll('tr');
-    for (const row of Array.from(rows)) {
-      const verdictEl = row.querySelector('.verdict-accepted');
-      const textContent = row.textContent || '';
+function temukanIndeksKolom(tabel: Element, polaHeader: RegExp): number {
+  const headers = tabel.querySelectorAll('th');
+  for (let i = 0; i < headers.length; i++) {
+    if (polaHeader.test(headers[i].textContent || '')) {
+      return i;
+    }
+  }
+  return -1;
+}
+
+function ambilSubmissionACTerakhirDariSidebar(): { submissionId: string; language?: string } | null {
+  const daftarTabel = document.querySelectorAll('table.rtable, .status-frame-datatable');
+  for (const tabel of Array.from(daftarTabel)) {
+    const indeksBahasa = temukanIndeksKolom(tabel, /lang|bahasa/i);
+    const daftarBaris = tabel.querySelectorAll('tr');
+
+    for (const baris of Array.from(daftarBaris)) {
+      const verdictEl = baris.querySelector('.verdict-accepted');
+      const textContent = baris.textContent || '';
       const isAccepted = verdictEl || /\bAccepted\b/i.test(textContent);
       if (isAccepted) {
-        const link = row.querySelector('a.view-source, a[href*="/submission/"]') as HTMLAnchorElement;
+        const link = baris.querySelector('a.view-source, a[href*="/submission/"]') as HTMLAnchorElement;
         const subId =
           link?.getAttribute('submissionid') ||
           link?.href?.match(/\/submission\/(\d+)/)?.[1] ||
           link?.textContent?.trim();
         if (subId && /^\d+$/.test(subId)) {
-          const cells = row.querySelectorAll('td');
-          const language = cells[3]?.textContent?.trim();
-          return { submissionId: subId, language };
+          const sel = baris.querySelectorAll('td');
+          let bahasa: string | undefined;
+
+          if (indeksBahasa >= 0 && sel[indeksBahasa]) {
+            bahasa = sel[indeksBahasa]?.textContent?.trim();
+          } else if (sel.length >= 5) {
+            bahasa = sel[sel.length === 8 ? 4 : 3]?.textContent?.trim();
+          }
+
+          return { submissionId: subId, language: bahasa };
         }
       }
     }
@@ -423,53 +439,39 @@ function getLatestAcceptedFromSidebar(): { submissionId: string; language?: stri
   return null;
 }
 
-async function fetchSubmissionSourceCode(
+async function ambilKodeSumberSubmission(
   contestId: number | string,
   submissionId: number | string,
 ): Promise<string> {
-  // 1. Check if source code is already visible/mounted in current document
-  const existingCode = findSourceCodeInActiveDocument();
-  if (existingCode) {
-    return existingCode;
-  }
+  const kodeAda = cariSourceCodeActivediDocument();
+  if (kodeAda) return kodeAda;
 
-  // 2. Query Codeforces internal AJAX endpoint /data/submitSource
-  const internalApiCode = await fetchSourceViaInternalApi(submissionId);
-  if (internalApiCode) {
-    return internalApiCode;
-  }
+  const kodeDariApi = await ambilSourceViaApiInternal(submissionId);
+  if (kodeDariApi) return kodeDariApi;
 
-  // 3. Programmatically trigger the submission popup link in DOM
-  const modalCode = await fetchSourceViaTriggeringModal(submissionId);
-  if (modalCode) {
-    return modalCode;
-  }
+  const kodeDariModal = await ambilSourceViaTriggerModal(submissionId);
+  if (kodeDariModal) return kodeDariModal;
 
-  // 4. Fallback GET requests to submission URLs with credentials
-  const directUrlCode = await fetchSourceViaDirectUrl(contestId, submissionId);
-  if (directUrlCode) {
-    return directUrlCode;
-  }
+  const kodeDariUrlLangsung = await ambilSourceViaUrlLangsung(contestId, submissionId);
+  if (kodeDariUrlLangsung) return kodeDariUrlLangsung;
 
   throw new Error('Could not locate source code on Codeforces. Please open your submission to view code.');
 }
 
-async function fetchAndSyncLatestAC(statusSpan?: HTMLElement) {
+async function ambilDanSinkronisasiACTerakhir(statusSpan?: HTMLElement) {
   const config = await browser.runtime.sendMessage({ type: 'GET_CONFIG' });
   const handle = config?.codeforcesHandle;
 
-  const ci = getContestAndIndex();
+  const ci = ambilContestDanIndex();
   if (!ci) throw new Error('Could not parse contest & problem index.');
 
-  // 1. Check if the "Last submissions" widget on current page shows an Accepted submission
-  const sidebarAc = getLatestAcceptedFromSidebar();
+  const sidebarAc = ambilSubmissionACTerakhirDariSidebar();
   let submissionId = sidebarAc?.submissionId;
   let programmingLanguage = sidebarAc?.language;
   let execTime: string | undefined;
   let memoryUsed: string | undefined;
   let submittedAt = Date.now();
 
-  // 2. Query official Codeforces API if handle is available to enrich metadata
   if (handle) {
     try {
       const apiUrl = `https://codeforces.com/api/user.status?handle=${encodeURIComponent(handle)}&from=1&count=20`;
@@ -492,9 +494,7 @@ async function fetchAndSyncLatestAC(statusSpan?: HTMLElement) {
           submittedAt = acSubmission.creationTimeSeconds * 1000;
         }
       }
-    } catch (apiErr) {
-      console.warn('[CPBase] Codeforces API status check skipped:', apiErr);
-    }
+    } catch {}
   }
 
   if (!submissionId) {
@@ -509,7 +509,6 @@ async function fetchAndSyncLatestAC(statusSpan?: HTMLElement) {
     statusSpan.style.color = '#3b82f6';
   }
 
-  // Detect language fallback from page's submit selector if still unknown
   if (!programmingLanguage) {
     const langSelect = document.querySelector('select[name="programTypeId"]') as HTMLSelectElement;
     if (langSelect && langSelect.selectedIndex >= 0) {
@@ -518,19 +517,19 @@ async function fetchAndSyncLatestAC(statusSpan?: HTMLElement) {
     programmingLanguage = programmingLanguage || 'GNU C++';
   }
 
-  const code = await fetchSubmissionSourceCode(ci.contestId, submissionId);
-  const problemDetails = extractProblemDetails();
-  if (!problemDetails) throw new Error('Could not extract problem statement details.');
+  const kode = await ambilKodeSumberSubmission(ci.contestId, submissionId);
+  const detailProblem = ekstrakDetailProblem();
+  if (!detailProblem) throw new Error('Could not extract problem statement details.');
 
-  const ext = detectFileExtension(programmingLanguage);
+  const ekstensi = deteksiEkstensiFile(programmingLanguage, kode);
 
   const submissionData: SubmissionData = {
     platform: 'codeforces',
     submissionId,
-    problem: problemDetails,
+    problem: detailProblem,
     language: programmingLanguage,
-    extension: ext,
-    sourceCode: code,
+    extension: ekstensi,
+    sourceCode: kode,
     verdict: 'Accepted',
     executionTime: execTime,
     memoryUsed: memoryUsed,
@@ -557,51 +556,45 @@ async function fetchAndSyncLatestAC(statusSpan?: HTMLElement) {
   }
 }
 
-/**
- * Automatic sync for a specific Codeforces submission ID
- */
-async function autoSyncCodeforcesSubmission(
+async function sinkronisasiOtomatisCodeforces(
   submissionId: string,
   contestId: string,
   index: string,
   problemTitle?: string,
   language?: string,
 ) {
-  if (isAutoSyncing || processedSubmissionIds.has(submissionId)) return;
+  if (sedangAutoSync || idSubmissionDiproses.has(submissionId)) return;
 
-  // Check config
   const config = await browser.runtime.sendMessage({ type: 'GET_CONFIG' });
   if (config?.autoSync === false || config?.enabledPlatforms?.codeforces === false) {
     return;
   }
 
-  // Check if already synced in storage
   const syncCheck = await browser.runtime.sendMessage({
     type: 'IS_SUBMISSION_SYNCED',
     payload: { platform: 'codeforces', submissionId },
   });
 
   if (syncCheck?.synced) {
-    processedSubmissionIds.add(submissionId);
+    idSubmissionDiproses.add(submissionId);
     return;
   }
 
-  isAutoSyncing = true;
-  processedSubmissionIds.add(submissionId);
+  sedangAutoSync = true;
+  idSubmissionDiproses.add(submissionId);
 
-  const problemKey = `${contestId}${index}`;
-  showFloatingToast(`[CPBase] Detected AC submission #${submissionId} for ${problemKey}. Auto-syncing to GitHub...`, 'info');
+  const kunciProblem = `${contestId}${index}`;
+  tampilkanToastMelayang(`[CPBase] Detected AC submission #${submissionId} for ${kunciProblem}. Auto-syncing to GitHub...`, 'info');
 
   try {
-    const code = await fetchSubmissionSourceCode(contestId, submissionId);
-    let problemDetails = extractProblemDetails();
+    const kode = await ambilKodeSumberSubmission(contestId, submissionId);
+    let detailProblem = ekstrakDetailProblem();
 
-    if (!problemDetails) {
-      // Build problem details if on submission/status page
+    if (!detailProblem) {
       const problemUrl = `https://codeforces.com/contest/${contestId}/problem/${index}`;
-      problemDetails = {
+      detailProblem = {
         platform: 'codeforces',
-        problemId: problemKey,
+        problemId: kunciProblem,
         problemTitle: problemTitle || `Problem ${index}`,
         problemUrl,
         contestId,
@@ -610,16 +603,16 @@ async function autoSyncCodeforcesSubmission(
       };
     }
 
-    const lang = language || 'C++';
-    const ext = detectFileExtension(lang);
+    const bahasa = language || 'C++';
+    const ekstensi = deteksiEkstensiFile(bahasa, kode);
 
     const submissionData: SubmissionData = {
       platform: 'codeforces',
       submissionId,
-      problem: problemDetails,
-      language: lang,
-      extension: ext,
-      sourceCode: code,
+      problem: detailProblem,
+      language: bahasa,
+      extension: ekstensi,
+      sourceCode: kode,
       verdict: 'Accepted',
       submittedAt: Date.now(),
     };
@@ -630,95 +623,105 @@ async function autoSyncCodeforcesSubmission(
     });
 
     if (res.ok) {
-      showFloatingToast(`[CPBase] Auto-synced ${problemKey} (${problemDetails.problemTitle}) to GitHub!`, 'success');
+      tampilkanToastMelayang(`[CPBase] Auto-synced ${kunciProblem} (${detailProblem.problemTitle}) to GitHub!`, 'success');
     } else {
       throw new Error(res.error || 'Commit failed');
     }
   } catch (err: any) {
-    console.error('[CPBase] Codeforces auto-sync error:', err);
-    showFloatingToast(`[CPBase] Auto-sync failed: ${err.message}`, 'error');
+    tampilkanToastMelayang(`[CPBase] Auto-sync failed: ${err.message}`, 'error');
   } finally {
-    isAutoSyncing = false;
+    sedangAutoSync = false;
   }
 }
 
-/**
- * If the user directly opened or reloaded a single submission page: /contest/1900/submission/25000000
- */
-async function checkSingleSubmissionPage() {
+async function periksaHalamanSubmissionTunggal() {
   const m = window.location.pathname.match(/\/submission\/(\d+)/i);
   if (!m) return;
 
   const submissionId = m[1];
-  if (processedSubmissionIds.has(submissionId)) return;
+  if (idSubmissionDiproses.has(submissionId)) return;
 
-  // Check if verdict is Accepted
   const verdictEl = document.querySelector('.verdict-accepted');
   if (!verdictEl && !/Accepted/i.test(document.body.innerText)) return;
 
-  // Extract contest and problem link from the submission datatable
   const problemLink = document.querySelector('table.rtable a[href*="/problem/"], .status-frame-datatable a[href*="/problem/"]') as HTMLAnchorElement;
   if (!problemLink) return;
 
-  const parsed = parseProblemFromUrl(problemLink.getAttribute('href') || '');
+  const parsed = uraikanProblemDariUrl(problemLink.getAttribute('href') || '');
   if (!parsed) return;
 
   const title = problemLink.textContent?.trim();
-  const langCell = document.querySelector('table.rtable td:nth-child(4), .status-frame-datatable td:nth-child(4)');
-  const language = langCell?.textContent?.trim() || 'C++';
+  const tabel = document.querySelector('table.rtable, .status-frame-datatable');
+  let bahasa = 'C++';
 
-  await autoSyncCodeforcesSubmission(submissionId, parsed.contestId, parsed.index, title, language);
+  if (tabel) {
+    const indeksBahasa = temukanIndeksKolom(tabel, /lang|bahasa/i);
+    const sel = tabel.querySelectorAll('td');
+    if (indeksBahasa >= 0 && sel[indeksBahasa]) {
+      bahasa = sel[indeksBahasa].textContent?.trim() || 'C++';
+    } else {
+      const selAlternatif = document.querySelector('table.rtable td:nth-child(4), .status-frame-datatable td:nth-child(5)');
+      if (selAlternatif?.textContent?.trim()) {
+        bahasa = selAlternatif.textContent.trim();
+      }
+    }
+  }
+
+  await sinkronisasiOtomatisCodeforces(submissionId, parsed.contestId, parsed.index, title, bahasa);
 }
 
-/**
- * Watch for live verdict updates in Codeforces datatables
- */
-function observeSubmissionStatus() {
-  function scanDatatable() {
-    const rows = document.querySelectorAll('.status-frame-datatable tr[data-submission-id]');
-    rows.forEach((row) => {
-      const submissionId = row.getAttribute('data-submission-id');
-      if (!submissionId || processedSubmissionIds.has(submissionId)) return;
+function pantauStatusSubmission() {
+  function periksaTabelDatatable() {
+    const daftarBaris = document.querySelectorAll('.status-frame-datatable tr[data-submission-id]');
+    const tabel = document.querySelector('.status-frame-datatable');
+    const indeksBahasa = tabel ? temukanIndeksKolom(tabel, /lang|bahasa/i) : -1;
 
-      const verdictEl = row.querySelector('.verdict-accepted');
+    daftarBaris.forEach((baris) => {
+      const submissionId = baris.getAttribute('data-submission-id');
+      if (!submissionId || idSubmissionDiproses.has(submissionId)) return;
+
+      const verdictEl = baris.querySelector('.verdict-accepted');
       if (!verdictEl) return;
 
-      // Extract problem info from row
-      const problemLink = row.querySelector('a[href*="/problem/"]') as HTMLAnchorElement;
+      const problemLink = baris.querySelector('a[href*="/problem/"]') as HTMLAnchorElement;
       if (!problemLink) return;
 
-      const parsed = parseProblemFromUrl(problemLink.getAttribute('href') || '');
+      const parsed = uraikanProblemDariUrl(problemLink.getAttribute('href') || '');
       if (!parsed) return;
 
       const title = problemLink.textContent?.trim();
-      const langEl = row.querySelector('td:nth-child(4)');
-      const language = langEl?.textContent?.trim() || 'C++';
+      const selBaris = baris.querySelectorAll('td');
+      let bahasa = 'C++';
 
-      autoSyncCodeforcesSubmission(submissionId, parsed.contestId, parsed.index, title, language);
+      if (indeksBahasa >= 0 && selBaris[indeksBahasa]) {
+        bahasa = selBaris[indeksBahasa].textContent?.trim() || 'C++';
+      } else {
+        const langEl = baris.querySelector('td:nth-child(5)') || baris.querySelector('td:nth-child(4)');
+        if (langEl?.textContent?.trim()) {
+          bahasa = langEl.textContent.trim();
+        }
+      }
+
+      sinkronisasiOtomatisCodeforces(submissionId, parsed.contestId, parsed.index, title, bahasa);
     });
   }
 
-  // Scan immediately
-  scanDatatable();
+  periksaTabelDatatable();
 
-  // Also observe for DOM mutations
   const statusTable = document.querySelector('.status-frame-datatable') || document.body;
-  const observer = new MutationObserver(() => {
-    scanDatatable();
+  const pengamat = new MutationObserver(() => {
+    periksaTabelDatatable();
   });
 
-  observer.observe(statusTable, { childList: true, subtree: true });
+  pengamat.observe(statusTable, { childList: true, subtree: true });
 }
 
-/**
- * Floating toast notification widget with light theme styling
- */
-function showFloatingToast(message: string, type: 'info' | 'success' | 'error') {
-  let toastContainer = document.getElementById('cpbase-toast-container');
-  if (!toastContainer) {
-    toastContainer = document.createElement('div');
-    toastContainer.id = 'cpbase-toast-container';
-    toastContainer.style.cssText = `
+function tampilkanToastMelayang(pesan: string, tipe: 'info' | 'success' | 'error') {
+  let wadahToast = document.getElementById('cpbase-toast-container');
+  if (!wadahToast) {
+    wadahToast = document.createElement('div');
+    wadahToast.id = 'cpbase-toast-container';
+    wadahToast.style.cssText = `
       position: fixed;
       bottom: 24px;
       left: 24px;
@@ -728,11 +731,11 @@ function showFloatingToast(message: string, type: 'info' | 'success' | 'error') 
       gap: 8px;
       pointer-events: none;
     `;
-    document.body.appendChild(toastContainer);
+    document.body.appendChild(wadahToast);
   }
 
   const toast = document.createElement('div');
-  const borderColor = type === 'success' ? '#10b981' : type === 'error' ? '#ef4444' : '#3b82f6';
+  const borderColor = tipe === 'success' ? '#10b981' : tipe === 'error' ? '#ef4444' : '#3b82f6';
   const bgColor = '#ffffff';
   const textColor = '#0f172a';
 
@@ -755,8 +758,8 @@ function showFloatingToast(message: string, type: 'info' | 'success' | 'error') 
     max-width: 380px;
   `;
 
-  toast.textContent = message;
-  toastContainer.appendChild(toast);
+  toast.textContent = pesan;
+  wadahToast.appendChild(toast);
 
   setTimeout(() => {
     toast.style.opacity = '0';

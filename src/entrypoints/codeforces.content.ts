@@ -1,5 +1,6 @@
 import { browser } from 'wxt/browser';
 import { htmlToMarkdown } from '@/lib/html-to-markdown';
+import { extractCodeforcesStatement } from '@/lib/problem-parser';
 import { detectFileExtension } from '@/lib/languages';
 import type { ProblemDetails, SubmissionData } from '@/lib/types';
 
@@ -84,7 +85,7 @@ function extractProblemDetails(): ProblemDetails | null {
   });
 
   const statementEl = document.querySelector('.problem-statement');
-  const statementMarkdown = statementEl ? htmlToMarkdown(statementEl.innerHTML) : '';
+  const statementMarkdown = statementEl ? extractCodeforcesStatement(statementEl) : '';
 
   return {
     platform: 'codeforces',

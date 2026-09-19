@@ -1,5 +1,6 @@
 import { browser } from 'wxt/browser';
 import { htmlToMarkdown } from '@/lib/html-to-markdown';
+import { extractTLXStatement } from '@/lib/problem-parser';
 import { detectFileExtension } from '@/lib/languages';
 import type { ProblemDetails, SubmissionData } from '@/lib/types';
 
@@ -192,7 +193,7 @@ function extractTLXProblemDetails(fallbackAlias?: string, fallbackTitle?: string
     document.querySelector('[class*="ProblemStatement"]') ||
     document.querySelector('[class*="description"]');
 
-  const statementMarkdown = contentEl ? htmlToMarkdown(contentEl.innerHTML) : '';
+  const statementMarkdown = contentEl ? extractTLXStatement(contentEl) : '';
 
   return {
     platform: 'tlx',
